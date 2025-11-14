@@ -1,0 +1,19 @@
+# VCS and tooling
+.git
+.gitignore
+
+# Build artifacts
+bin/
+coverage*
+*.test
+*.out
+
+# Local tooling / IDEs
+.vscode/
+.idea/
+
+# Helm packages
+charts/*.tgz
+
+# Docker specific
+Dockerfile~

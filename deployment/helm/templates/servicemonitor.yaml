@@ -1,0 +1,19 @@
+{{- if .Values.metricsServiceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "clustercost-agent-k8s.fullname" . }}
+  labels:
+    {{- include "clustercost-agent-k8s.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "clustercost-agent-k8s.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ default .Release.Namespace .Values.metricsServiceMonitor.namespace }}
+  endpoints:
+    - port: http
+      interval: {{ .Values.metricsServiceMonitor.interval }}
+      path: /metrics
+{{- end }}

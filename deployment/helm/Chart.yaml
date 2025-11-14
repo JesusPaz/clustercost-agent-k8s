@@ -1,0 +1,14 @@
+apiVersion: v2
+name: clustercost-agent-k8s
+description: ClusterCost Kubernetes cost visibility agent
+home: https://github.com/clustercost/clustercost-agent-k8s
+sources:
+  - https://github.com/clustercost/clustercost-agent-k8s
+keywords:
+  - cost
+  - finops
+  - kubernetes
+  - prometheus
+type: application
+version: 0.1.0
+appVersion: 0.1.0

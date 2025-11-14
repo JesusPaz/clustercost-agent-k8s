@@ -1,0 +1,189 @@
+package config
+
+import (
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"strconv"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Config captures the runtime settings for the agent.
+type Config struct {
+	ClusterName           string        `yaml:"clusterName"`
+	ListenAddr            string        `yaml:"listenAddr"`
+	LogLevel              string        `yaml:"logLevel"`
+	ScrapeIntervalSeconds int           `yaml:"scrapeIntervalSeconds"`
+	KubeconfigPath        string        `yaml:"kubeconfig"`
+	Pricing               PricingConfig `yaml:"pricing"`
+}
+
+// PricingConfig represents the simplified pricing inputs for cost calculations.
+type PricingConfig struct {
+	Provider              string  `yaml:"provider"`
+	Region                string  `yaml:"region"`
+	CPUCoreHourPriceUSD   float64 `yaml:"cpuHourPrice"`
+	MemoryGiBHourPriceUSD float64 `yaml:"memoryGibHourPrice"`
+}
+
+// DefaultConfig returns sane defaults for the agent.
+func DefaultConfig() Config {
+	return Config{
+		ClusterName:           "kubernetes",
+		ListenAddr:            ":8080",
+		LogLevel:              "info",
+		ScrapeIntervalSeconds: 30,
+		Pricing: PricingConfig{
+			Provider:              "aws",
+			Region:                "us-east-1",
+			CPUCoreHourPriceUSD:   0.046, // Rough on-demand m5.large equivalent
+			MemoryGiBHourPriceUSD: 0.005,
+		},
+	}
+}
+
+// ScrapeInterval returns the configured interval in duration units.
+func (c Config) ScrapeInterval() time.Duration {
+	if c.ScrapeIntervalSeconds <= 0 {
+		return 30 * time.Second
+	}
+	return time.Duration(c.ScrapeIntervalSeconds) * time.Second
+}
+
+// Load builds the configuration by merging defaults, file, environment, and flags.
+func Load() (Config, error) {
+	cfg := DefaultConfig()
+
+	// Step 1: optional config file
+	configFile := envOrDefault("CLUSTERCOST_CONFIG_FILE", "")
+
+	fs := flag.NewFlagSet("clustercost-agent-k8s", flag.ContinueOnError)
+	fs.StringVar(&configFile, "config", configFile, "Path to YAML config file")
+	fs.StringVar(&cfg.ClusterName, "cluster-name", cfg.ClusterName, "Logical cluster name")
+	fs.StringVar(&cfg.ListenAddr, "listen-addr", cfg.ListenAddr, "HTTP listen address")
+	fs.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "Log level (debug, info, warn, error)")
+	fs.IntVar(&cfg.ScrapeIntervalSeconds, "scrape-interval", cfg.ScrapeIntervalSeconds, "Scrape interval in seconds")
+	fs.StringVar(&cfg.KubeconfigPath, "kubeconfig", cfg.KubeconfigPath, "Path to kubeconfig (optional)")
+	fs.StringVar(&cfg.Pricing.Provider, "pricing-provider", cfg.Pricing.Provider, "Pricing provider identifier")
+	fs.StringVar(&cfg.Pricing.Region, "pricing-region", cfg.Pricing.Region, "Pricing region")
+	fs.Float64Var(&cfg.Pricing.CPUCoreHourPriceUSD, "cpu-price", cfg.Pricing.CPUCoreHourPriceUSD, "CPU core hour price in USD")
+	fs.Float64Var(&cfg.Pricing.MemoryGiBHourPriceUSD, "memory-price", cfg.Pricing.MemoryGiBHourPriceUSD, "Memory GiB hour price in USD")
+
+	if err := fs.Parse(os.Args[1:]); err != nil { // flag set already prints errors
+		return Config{}, err
+	}
+
+	if configFile != "" {
+		if err := loadFromFile(configFile, &cfg); err != nil {
+			return Config{}, err
+		}
+	}
+
+	// Apply env overrides after file load so that env > file.
+	applyEnvOverrides(&cfg)
+
+	// Flags already parsed into cfg before file/env to honor precedence order: env > file > flags would
+	// be counter intuitive for operators, so we accept flags as ultimate override.
+
+	if cfg.Pricing.CPUCoreHourPriceUSD < 0 || cfg.Pricing.MemoryGiBHourPriceUSD < 0 {
+		return Config{}, errors.New("pricing values must be non-negative")
+	}
+
+	if cfg.ScrapeIntervalSeconds < 5 {
+		cfg.ScrapeIntervalSeconds = 5
+	}
+
+	return cfg, nil
+}
+
+func loadFromFile(path string, cfg *Config) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read config file: %w", err)
+	}
+
+	type fileConfig Config
+	var fileCfg fileConfig
+	if err := yaml.Unmarshal(data, &fileCfg); err != nil {
+		return fmt.Errorf("parse config file: %w", err)
+	}
+
+	mergeConfigs(cfg, Config(fileCfg))
+	return nil
+}
+
+func mergeConfigs(base *Config, override Config) {
+	if override.ClusterName != "" {
+		base.ClusterName = override.ClusterName
+	}
+	if override.ListenAddr != "" {
+		base.ListenAddr = override.ListenAddr
+	}
+	if override.LogLevel != "" {
+		base.LogLevel = override.LogLevel
+	}
+	if override.ScrapeIntervalSeconds != 0 {
+		base.ScrapeIntervalSeconds = override.ScrapeIntervalSeconds
+	}
+	if override.KubeconfigPath != "" {
+		base.KubeconfigPath = override.KubeconfigPath
+	}
+	if override.Pricing.Provider != "" {
+		base.Pricing.Provider = override.Pricing.Provider
+	}
+	if override.Pricing.Region != "" {
+		base.Pricing.Region = override.Pricing.Region
+	}
+	if override.Pricing.CPUCoreHourPriceUSD != 0 {
+		base.Pricing.CPUCoreHourPriceUSD = override.Pricing.CPUCoreHourPriceUSD
+	}
+	if override.Pricing.MemoryGiBHourPriceUSD != 0 {
+		base.Pricing.MemoryGiBHourPriceUSD = override.Pricing.MemoryGiBHourPriceUSD
+	}
+}
+
+func applyEnvOverrides(cfg *Config) {
+	if v := os.Getenv("CLUSTERCOST_CLUSTER_NAME"); v != "" {
+		cfg.ClusterName = v
+	}
+	if v := os.Getenv("CLUSTERCOST_LISTEN_ADDR"); v != "" {
+		cfg.ListenAddr = v
+	}
+	if v := os.Getenv("CLUSTERCOST_LOG_LEVEL"); v != "" {
+		cfg.LogLevel = v
+	}
+	if v := os.Getenv("CLUSTERCOST_SCRAPE_INTERVAL"); v != "" {
+		if iv, err := strconv.Atoi(v); err == nil {
+			cfg.ScrapeIntervalSeconds = iv
+		}
+	}
+	if v := os.Getenv("CLUSTERCOST_KUBECONFIG"); v != "" {
+		cfg.KubeconfigPath = v
+	}
+	if v := os.Getenv("CLUSTERCOST_PROVIDER"); v != "" {
+		cfg.Pricing.Provider = v
+	}
+	if v := os.Getenv("CLUSTERCOST_REGION"); v != "" {
+		cfg.Pricing.Region = v
+	}
+	if v := os.Getenv("CLUSTERCOST_CPU_HOUR_PRICE"); v != "" {
+		if fv, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.Pricing.CPUCoreHourPriceUSD = fv
+		}
+	}
+	if v := os.Getenv("CLUSTERCOST_MEMORY_GIB_HOUR_PRICE"); v != "" {
+		if fv, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.Pricing.MemoryGiBHourPriceUSD = fv
+		}
+	}
+}
+
+func envOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
