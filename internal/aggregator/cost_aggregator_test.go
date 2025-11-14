@@ -18,7 +18,13 @@ func newTestLogger() *slog.Logger {
 
 func TestCostAggregatorAggregate(t *testing.T) {
 	calc := pricing.NewCalculator(1, 0.5) // simple prices for assertions
-	agg := NewCostAggregator(calc, enricher.NewLabelEnricher(), newTestLogger())
+	nodePricer, err := pricing.NewAWSPricing("us-east-1", map[string]map[string]float64{
+		"us-east-1": {"m5.large": 0.096},
+	})
+	if err != nil {
+		t.Fatalf("pricing init: %v", err)
+	}
+	agg := NewCostAggregator(calc, enricher.NewLabelEnricher(), nodePricer, "aws", "us-east-1", newTestLogger())
 
 	snapshot := kube.ClusterSnapshot{
 		ClusterName: "dev",
@@ -27,7 +33,16 @@ func TestCostAggregatorAggregate(t *testing.T) {
 			{Name: "payments", Labels: map[string]string{"team": "finops", "env": "prod"}},
 		},
 		Nodes: []kube.Node{
-			{Name: "node-a", Labels: map[string]string{"topology.kubernetes.io/zone": "us-east-1a"}},
+			{
+				Name:             "node-a",
+				InstanceType:     "m5.large",
+				AvailabilityZone: "us-east-1a",
+				AllocatableCPU:   4000,
+				AllocatableMem:   16 * 1024 * 1024 * 1024,
+				RequestedCPU:     2000,
+				RequestedMem:     8 * 1024 * 1024 * 1024,
+				Labels:           map[string]string{"topology.kubernetes.io/zone": "us-east-1a"},
+			},
 		},
 		Pods: []kube.Pod{
 			{
@@ -35,6 +50,8 @@ func TestCostAggregatorAggregate(t *testing.T) {
 				Name:      "cart-abc",
 				NodeName:  "node-a",
 				Labels:    map[string]string{"service": "cart"},
+				OwnerKind: "Deployment",
+				OwnerName: "cart-ctrl",
 				Containers: []kube.PodContainer{
 					{CPURequestMilli: 200, MemoryRequestBytes: 512 * 1024 * 1024},
 				},
@@ -62,6 +79,16 @@ func TestCostAggregatorAggregate(t *testing.T) {
 		t.Fatalf("cluster hourly cost mismatch: %.2f vs %.2f", data.Cluster.HourlyCost, expectedCost)
 	}
 
+	if len(data.Nodes) != 1 {
+		t.Fatalf("expected 1 node entry, got %d", len(data.Nodes))
+	}
+	if data.Nodes[0].RawNodePriceHourly != 0.096 {
+		t.Fatalf("expected raw node price 0.096 got %.3f", data.Nodes[0].RawNodePriceHourly)
+	}
+	if data.Cluster.CostByInstanceType == nil || len(data.Cluster.CostByInstanceType) != 1 {
+		t.Fatalf("expected cost by instance type entry")
+	}
+
 	if len(data.Labels) == 0 {
 		t.Fatalf("expected label aggregations")
 	}
@@ -78,4 +105,20 @@ func TestCostAggregatorAggregate(t *testing.T) {
 	if !foundTeam {
 		t.Fatalf("team label aggregation missing")
 	}
+
+	workloads := WorkloadsFromPods(data.Pods)
+	if len(workloads) != 1 {
+		t.Fatalf("expected 1 workload, got %d", len(workloads))
+	}
+	w := workloads[0]
+	if w.WorkloadKind != "Deployment" || w.WorkloadName != "cart-ctrl" {
+		t.Fatalf("unexpected workload grouping: %+v", w)
+	}
+	if w.Replicas != 1 {
+		t.Fatalf("expected replicas=1 got %d", w.Replicas)
+	}
+}
+
+func init() {
+	// ensure test pods have controller metadata
 }

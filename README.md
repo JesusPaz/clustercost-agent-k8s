@@ -58,9 +58,34 @@ pricing:
   region: us-east-1
   cpuHourPrice: 0.046
   memoryGibHourPrice: 0.005
+  aws:
+    nodePrices:
+      us-east-1:
+        m5.large: 0.096
+        m5.xlarge: 0.192
 clusterName: prod-us-east-1
 scrapeIntervalSeconds: 45
 ```
+
+### Refreshing AWS node prices
+
+The repo includes `hack/cmd/generate-pricing`, a helper that talks to the AWS Pricing API and regenerates the embedded `defaultAWSNodePrices` map. To update pricing:
+
+```bash
+# Supply the regions and instance types you care about (comma separated)
+make generate-pricing \
+  REGIONS="us-east-1,us-east-2,us-west-2,eu-west-1,eu-central-1,ap-southeast-1,ap-southeast-2,ap-northeast-1,ap-northeast-2" \
+  INSTANCE_TYPES="m5.large,m5.xlarge,m5.2xlarge,c5.large,c5.xlarge,c5.2xlarge"
+
+# Or let the tool discover every instance type automatically
+make generate-pricing-all REGIONS="us-east-1,us-east-2,us-west-2"
+```
+
+If you want to cover *all* SKUs:
+
+1. Use `aws pricing get-products` or `aws ec2 describe-instance-types` to dump the instance-type list for on-demand Linux shared capacity.
+2. Build a comma-separated list (or store it in a file and pass `INSTANCE_TYPES="$(cat list.txt)"`).
+3. Re-run `make generate-pricing` with those inputs. The command only needs AWS network access during generation—there are still **no runtime calls** from the agent.
 
 ## Prometheus Metrics
 
@@ -76,9 +101,11 @@ Additional internal gauges capture usage and owner metadata, enabling dashboards
 ## HTTP JSON API
 
 - `GET /api/health` – readiness + cluster summary.
-- `GET /api/cost/summary` – cluster totals plus aggregated label spend.
+- `GET /api/cost/summary` – cluster totals with provider/region metadata, label allocation, and cost by instance type.
 - `GET /api/cost/namespaces` – namespaces with hourly cost and request totals.
 - `GET /api/cost/pods` – pods enriched with node placement and controller fields.
+- `GET /api/cost/nodes` – node-level pricing, allocation, and utilization (raw vs allocated cost, CPU/memory usage).
+- `GET /api/cost/workloads` – aggregates pods into workloads (Deployments/StatefulSets/etc.) with replica counts and cost.
 
 ## Security & RBAC
 

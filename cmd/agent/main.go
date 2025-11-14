@@ -41,7 +41,16 @@ func main() {
 	metricsCollector := collector.NewMetricsCollector(kubeClient, logger)
 	calc := pricing.NewCalculator(cfg.Pricing.CPUCoreHourPriceUSD, cfg.Pricing.MemoryGiBHourPriceUSD)
 	labelEnricher := enricher.NewLabelEnricher()
-	agg := aggregator.NewCostAggregator(calc, labelEnricher, logger)
+	var nodePricer pricing.NodePriceResolver
+	if cfg.Pricing.Provider == "aws" {
+		awsPricer, err := pricing.NewAWSPricing(cfg.Pricing.Region, cfg.Pricing.AWS.NodePrices)
+		if err != nil {
+			logger.Warn("failed to initialise AWS pricing resolver", slog.String("error", err.Error()))
+		} else {
+			nodePricer = awsPricer
+		}
+	}
+	agg := aggregator.NewCostAggregator(calc, labelEnricher, nodePricer, cfg.Pricing.Provider, cfg.Pricing.Region, logger)
 	promExporter := exporter.NewPrometheusExporter(cfg.ClusterName)
 	api := exporter.NewHTTPAPI(agg)
 

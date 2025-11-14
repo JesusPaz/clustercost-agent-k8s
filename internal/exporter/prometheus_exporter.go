@@ -14,7 +14,8 @@ type PrometheusExporter struct {
 	registry      *prometheus.Registry
 	podCost       *prometheus.GaugeVec
 	namespaceCost *prometheus.GaugeVec
-	nodeCost      *prometheus.GaugeVec
+	nodeAllocated *prometheus.GaugeVec
+	nodeRaw       *prometheus.GaugeVec
 	clusterCost   *prometheus.GaugeVec
 }
 
@@ -32,23 +33,29 @@ func NewPrometheusExporter(clusterName string) *PrometheusExporter {
 		Help: "Estimated hourly namespace cost",
 	}, []string{"namespace", "team", "service", "env", "client", "cluster_name"})
 
-	nodeGauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	nodeAllocGauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "clustercost_node_cost_hourly",
-		Help: "Estimated hourly node cost",
+		Help: "Allocated hourly node cost (sum of pod costs)",
 	}, []string{"node", "cluster_name"})
+
+	nodeRawGauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "clustercost_node_raw_price_hourly",
+		Help: "Raw on-demand node price per hour",
+	}, []string{"node", "instance_type", "cluster_name"})
 
 	clusterGauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "clustercost_cluster_cost_hourly",
 		Help: "Estimated hourly cluster cost",
 	}, []string{"cluster_name"})
 
-	reg.MustRegister(podGauge, nsGauge, nodeGauge, clusterGauge)
+	reg.MustRegister(podGauge, nsGauge, nodeAllocGauge, nodeRawGauge, clusterGauge)
 
 	exporter := &PrometheusExporter{
 		registry:      reg,
 		podCost:       podGauge,
 		namespaceCost: nsGauge,
-		nodeCost:      nodeGauge,
+		nodeAllocated: nodeAllocGauge,
+		nodeRaw:       nodeRawGauge,
 		clusterCost:   clusterGauge,
 	}
 
@@ -65,7 +72,8 @@ func (p *PrometheusExporter) Handler() http.Handler {
 func (p *PrometheusExporter) Update(data aggregator.AggregatedData) {
 	p.podCost.Reset()
 	p.namespaceCost.Reset()
-	p.nodeCost.Reset()
+	p.nodeAllocated.Reset()
+	p.nodeRaw.Reset()
 	p.clusterCost.Reset()
 
 	clusterName := data.Cluster.ClusterName
@@ -100,6 +108,7 @@ func (p *PrometheusExporter) Update(data aggregator.AggregatedData) {
 	}
 
 	for _, node := range data.Nodes {
-		p.nodeCost.WithLabelValues(node.Node, clusterName).Set(node.HourlyCost)
+		p.nodeAllocated.WithLabelValues(node.Name, clusterName).Set(node.AllocatedCostHourly)
+		p.nodeRaw.WithLabelValues(node.Name, node.InstanceType, clusterName).Set(node.RawNodePriceHourly)
 	}
 }

@@ -24,6 +24,8 @@ func (h *HTTPAPI) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/cost/summary", h.summary)
 	mux.HandleFunc("/api/cost/namespaces", h.namespaces)
 	mux.HandleFunc("/api/cost/pods", h.pods)
+	mux.HandleFunc("/api/cost/nodes", h.nodes)
+	mux.HandleFunc("/api/cost/workloads", h.workloads)
 }
 
 func (h *HTTPAPI) health(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +54,16 @@ func (h *HTTPAPI) namespaces(w http.ResponseWriter, r *http.Request) {
 func (h *HTTPAPI) pods(w http.ResponseWriter, r *http.Request) {
 	data := h.aggregator.Data()
 	respondJSON(w, data.Pods)
+}
+
+func (h *HTTPAPI) nodes(w http.ResponseWriter, r *http.Request) {
+	data := h.aggregator.Data()
+	respondJSON(w, data.Nodes)
+}
+
+func (h *HTTPAPI) workloads(w http.ResponseWriter, r *http.Request) {
+	workloads := h.aggregator.Workloads()
+	respondJSON(w, workloads)
 }
 
 func respondJSON(w http.ResponseWriter, payload any) {

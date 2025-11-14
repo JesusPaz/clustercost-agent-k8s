@@ -27,6 +27,13 @@ type PricingConfig struct {
 	Region                string  `yaml:"region"`
 	CPUCoreHourPriceUSD   float64 `yaml:"cpuHourPrice"`
 	MemoryGiBHourPriceUSD float64 `yaml:"memoryGibHourPrice"`
+	AWS                   AWSPricingConfig `yaml:"aws"`
+}
+
+// AWSPricingConfig holds simple instance type pricing overrides.
+type AWSPricingConfig struct {
+	// NodePrices maps region -> instanceType -> hourly price in USD.
+	NodePrices map[string]map[string]float64 `yaml:"nodePrices"`
 }
 
 // DefaultConfig returns sane defaults for the agent.
@@ -41,6 +48,9 @@ func DefaultConfig() Config {
 			Region:                "us-east-1",
 			CPUCoreHourPriceUSD:   0.046, // Rough on-demand m5.large equivalent
 			MemoryGiBHourPriceUSD: 0.005,
+			AWS: AWSPricingConfig{
+				NodePrices: copyNodePrices(defaultAWSNodePrices()),
+			},
 		},
 	}
 }
@@ -143,6 +153,19 @@ func mergeConfigs(base *Config, override Config) {
 	if override.Pricing.MemoryGiBHourPriceUSD != 0 {
 		base.Pricing.MemoryGiBHourPriceUSD = override.Pricing.MemoryGiBHourPriceUSD
 	}
+	if override.Pricing.AWS.NodePrices != nil {
+		if base.Pricing.AWS.NodePrices == nil {
+			base.Pricing.AWS.NodePrices = map[string]map[string]float64{}
+		}
+		for region, instances := range override.Pricing.AWS.NodePrices {
+			if _, ok := base.Pricing.AWS.NodePrices[region]; !ok {
+				base.Pricing.AWS.NodePrices[region] = map[string]float64{}
+			}
+			for instance, price := range instances {
+				base.Pricing.AWS.NodePrices[region][instance] = price
+			}
+		}
+	}
 }
 
 func applyEnvOverrides(cfg *Config) {
@@ -186,4 +209,19 @@ func envOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func copyNodePrices(src map[string]map[string]float64) map[string]map[string]float64 {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]map[string]float64, len(src))
+	for region, instances := range src {
+		instCopy := make(map[string]float64, len(instances))
+		for it, price := range instances {
+			instCopy[it] = price
+		}
+		dst[region] = instCopy
+	}
+	return dst
 }

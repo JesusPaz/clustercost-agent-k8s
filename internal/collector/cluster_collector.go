@@ -14,13 +14,18 @@ import (
 
 // ClusterCollector reads kubernetes resources that feed the cost calculations.
 type ClusterCollector struct {
-	client *kube.Client
-	logger *slog.Logger
+	client        *kube.Client
+	logger        *slog.Logger
+	nodeCollector *NodeCollector
 }
 
 // NewClusterCollector returns a configured collector.
 func NewClusterCollector(client *kube.Client, logger *slog.Logger) *ClusterCollector {
-	return &ClusterCollector{client: client, logger: logger}
+	return &ClusterCollector{
+		client:        client,
+		logger:        logger,
+		nodeCollector: NewNodeCollector(client, logger),
+	}
 }
 
 // Collect fetches pods, namespaces, and nodes in a single snapshot.
@@ -37,17 +42,11 @@ func (c *ClusterCollector) Collect(ctx context.Context) (kube.ClusterSnapshot, e
 		return kube.ClusterSnapshot{}, fmt.Errorf("list namespaces: %w", err)
 	}
 
-	nodes, err := c.client.Kubernetes.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return kube.ClusterSnapshot{}, fmt.Errorf("list nodes: %w", err)
-	}
-
 	snapshot := kube.ClusterSnapshot{
 		ClusterName: c.client.ClusterName,
 		Timestamp:   time.Now(),
 		Pods:        make([]kube.Pod, 0, len(pods.Items)),
 		Namespaces:  make([]kube.Namespace, 0, len(namespaces.Items)),
-		Nodes:       make([]kube.Node, 0, len(nodes.Items)),
 	}
 
 	nsMap := map[string]kube.Namespace{}
@@ -57,16 +56,6 @@ func (c *ClusterCollector) Collect(ctx context.Context) (kube.ClusterSnapshot, e
 			Labels: ns.Labels,
 		}
 		snapshot.Namespaces = append(snapshot.Namespaces, nsMap[ns.Name])
-	}
-
-	for _, node := range nodes.Items {
-		snapshot.Nodes = append(snapshot.Nodes, kube.Node{
-			Name:         node.Name,
-			Labels:       node.Labels,
-			InstanceType: resolveInstanceType(node.Labels),
-			CapacityCPU:  node.Status.Capacity.Cpu().MilliValue(),
-			CapacityMem:  node.Status.Capacity.Memory().Value(),
-		})
 	}
 
 	for _, pod := range pods.Items {
@@ -81,6 +70,12 @@ func (c *ClusterCollector) Collect(ctx context.Context) (kube.ClusterSnapshot, e
 			Containers: extractContainers(pod.Spec.Containers),
 		})
 	}
+
+	nodeInfos, err := c.nodeCollector.Collect(ctx, pods.Items)
+	if err != nil {
+		return kube.ClusterSnapshot{}, fmt.Errorf("collect nodes: %w", err)
+	}
+	snapshot.Nodes = nodeInfos
 
 	c.logger.Debug("collected cluster snapshot", slog.Duration("duration", time.Since(start)))
 	return snapshot, nil

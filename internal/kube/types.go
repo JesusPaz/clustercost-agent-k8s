@@ -28,11 +28,17 @@ type Pod struct {
 
 // Node contains relevant metadata for pricing decisions.
 type Node struct {
-	Name         string
-	Labels       map[string]string
-	InstanceType string
-	CapacityCPU  int64 // milli-cores
-	CapacityMem  int64 // bytes
+	Name             string
+	ProviderID       string
+	AvailabilityZone string
+	Labels           map[string]string
+	InstanceType     string
+	CapacityCPU      int64 // milli-cores
+	CapacityMem      int64 // bytes
+	AllocatableCPU   int64 // milli-cores
+	AllocatableMem   int64 // bytes
+	RequestedCPU     int64 // milli-cores
+	RequestedMem     int64 // bytes
 }
 
 // Namespace describes kubernetes namespaces with cost labels.
