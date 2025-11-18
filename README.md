@@ -110,6 +110,7 @@ Additional internal gauges capture usage and owner metadata, enabling dashboards
 - `GET /api/cost/pods` – pods enriched with node placement and controller fields.
 - `GET /api/cost/nodes` – node-level pricing, allocation, and utilization (raw vs allocated cost, CPU/memory usage).
 - `GET /api/cost/workloads` – aggregates pods into workloads (Deployments/StatefulSets/etc.) with replica counts and cost.
+- `GET /agent/v1/readyz` – readiness probe for Kubernetes; returns 200 once a snapshot is available.
 
 ## Security & RBAC
 

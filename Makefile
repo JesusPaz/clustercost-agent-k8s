@@ -14,7 +14,8 @@ run:
 	go run ./cmd/agent
 
 lint:
-	golangci-lint run ./...
+	@mkdir -p .cache/golangci-lint .cache/go-build
+	GOLANGCI_LINT_CACHE=$(PWD)/.cache/golangci-lint GOCACHE=$(PWD)/.cache/go-build golangci-lint run --config .golangci.yml
 
 test:
 	go test ./...

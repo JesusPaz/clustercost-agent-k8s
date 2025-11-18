@@ -38,7 +38,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.56
+          version: v1.61
           args: --config .golangci.yml
 
   gosec:
@@ -54,6 +54,6 @@ jobs:
           cache: true
 
       - name: Run gosec
-        uses: securego/gosec@v2
+        uses: securego/gosec@v2.22.1
         with:
           args: ./...

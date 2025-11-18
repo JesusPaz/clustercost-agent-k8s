@@ -30,6 +30,7 @@ func NewHandler(clusterType, clusterName, clusterRegion, version string, store *
 
 // Register wires all API endpoints on the mux.
 func (h *Handler) Register(mux *http.ServeMux) {
+	mux.HandleFunc("/agent/v1/readyz", h.readyz)
 	mux.HandleFunc("/agent/v1/overview", h.overview)
 	mux.HandleFunc("/agent/v1/health", h.health)
 	mux.HandleFunc("/agent/v1/namespaces", h.namespaces)
@@ -78,6 +79,14 @@ func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
 		"timestamp":     time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	respondJSON(w, http.StatusOK, payload)
+}
+
+func (h *Handler) readyz(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.store.Latest(); ok {
+		respondJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+		return
+	}
+	respondError(w, http.StatusServiceUnavailable, "snapshot not ready")
 }
 
 func (h *Handler) namespaces(w http.ResponseWriter, r *http.Request) {
