@@ -9,6 +9,7 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/rlimit"
 )
 
 // Manager keeps eBPF programs and links alive for the agent.
@@ -21,6 +22,9 @@ type Manager struct {
 // Start loads and attaches eBPF programs based on configuration.
 func Start(cfg config.Config, logger *slog.Logger) (*Manager, error) {
 	mgr := &Manager{logger: logger}
+	if err := rlimit.RemoveMemlock(); err != nil {
+		return nil, fmt.Errorf("raise memlock rlimit: %w", err)
+	}
 
 	if cfg.Metrics.Enabled {
 		if err := mgr.loadMetrics(cfg.Metrics); err != nil {
