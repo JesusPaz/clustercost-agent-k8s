@@ -104,7 +104,7 @@ func (c *ebpfMetricsCollector) CollectPodMetrics(ctx context.Context, pods []*co
 
 		var cpuMilli int64
 		if !firstSample {
-			deltaCPU := diffUint64(stats.CPUTimeNS, last.CPUTimeNS)
+			deltaCPU := diffUint64Metrics(stats.CPUTimeNS, last.CPUTimeNS)
 			cpuMilli = int64(float64(deltaCPU) / float64(elapsedNS) * 1000)
 			if cpuMilli < 0 {
 				cpuMilli = 0
@@ -214,7 +214,7 @@ func cgroupInode(path string) (uint64, bool) {
 	return stat.Ino, true
 }
 
-func diffUint64(current, previous uint64) uint64 {
+func diffUint64Metrics(current, previous uint64) uint64 {
 	if current >= previous {
 		return current - previous
 	}

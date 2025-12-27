@@ -151,14 +151,14 @@ func (c *ebpfNetworkCollector) deltaStats(key flowKey, current flowStats) flowSt
 		return current
 	}
 	delta := flowStats{
-		TxBytes: diffUint64(current.TxBytes, last.TxBytes),
-		RxBytes: diffUint64(current.RxBytes, last.RxBytes),
+		TxBytes: diffUint64Flow(current.TxBytes, last.TxBytes),
+		RxBytes: diffUint64Flow(current.RxBytes, last.RxBytes),
 	}
 	c.last[key] = current
 	return delta
 }
 
-func diffUint64(current, previous uint64) uint64 {
+func diffUint64Flow(current, previous uint64) uint64 {
 	if current >= previous {
 		return current - previous
 	}
