@@ -77,7 +77,7 @@ func checkPinDirWritable(report *PreflightReport, label, pinPath string) {
 		return
 	}
 	dir := filepath.Dir(pinPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		report.Issues = append(report.Issues, PreflightIssue{
 			Component: label,
 			Message:   fmt.Sprintf("create pin dir failed: %s: %v", dir, err),
