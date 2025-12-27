@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,7 +113,7 @@ func (c *ebpfMetricsCollector) CollectPodMetrics(ctx context.Context, pods []*co
 		}
 		result[podKey] = kube.PodUsage{
 			CPUUsageMilli:    cpuMilli,
-			MemoryUsageBytes: int64(stats.MemoryBytes),
+			MemoryUsageBytes: safeInt64FromUint64(stats.MemoryBytes),
 		}
 	}
 
@@ -219,4 +220,11 @@ func diffUint64Metrics(current, previous uint64) uint64 {
 		return current - previous
 	}
 	return current
+}
+
+func safeInt64FromUint64(value uint64) int64 {
+	if value > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(value)
 }

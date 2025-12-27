@@ -2,10 +2,11 @@ package forwarder
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math/rand"
+	"math/big"
 	"os"
 	"path/filepath"
 	"sort"
@@ -31,8 +32,6 @@ type Queue struct {
 	mem           []queuedReport
 	memBytes      int64
 	flushCh       chan struct{}
-	randMu        sync.Mutex
-	rng           *rand.Rand
 }
 
 // NewQueue returns a configured Queue.
@@ -67,7 +66,6 @@ func NewQueue(dir string, maxBatch, maxRetries int, backoff, flushEvery time.Dur
 		sender:        sender,
 		logger:        logger,
 		flushCh:       make(chan struct{}, 1),
-		rng:           rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -129,7 +127,7 @@ func (q *Queue) Run(ctx context.Context) {
 }
 
 func (q *Queue) flushOnce(ctx context.Context) {
-	if err := os.MkdirAll(q.dir, 0o755); err != nil {
+	if err := os.MkdirAll(q.dir, 0o750); err != nil {
 		q.logger.Warn("create queue dir failed", slog.String("error", err.Error()))
 		return
 	}
@@ -188,7 +186,7 @@ func (q *Queue) flushOnce(ctx context.Context) {
 
 	reports := make([]AgentReport, 0, len(batchFiles))
 	for _, path := range batchFiles {
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- path is from queue dir entries
 		if err != nil {
 			q.logger.Warn("read queue file failed", slog.String("error", err.Error()))
 			continue
@@ -232,7 +230,7 @@ func (q *Queue) bumpRetries(paths []string) {
 }
 
 func (q *Queue) moveToFailed(path string) {
-	if err := os.MkdirAll(q.failDir, 0o755); err != nil {
+	if err := os.MkdirAll(q.failDir, 0o750); err != nil {
 		return
 	}
 	dst := filepath.Join(q.failDir, filepath.Base(path))
@@ -261,7 +259,6 @@ func setRetries(name string, retries int) string {
 	return base + strconv.Itoa(retries) + ".json"
 }
 
-// retriesFromName is kept for tests.
 type queuedReport struct {
 	report AgentReport
 	raw    []byte
@@ -306,13 +303,13 @@ func (q *Queue) flushMemory(ctx context.Context) bool {
 }
 
 func (q *Queue) writeToDisk(data []byte) error {
-	if err := os.MkdirAll(q.dir, 0o755); err != nil {
+	if err := os.MkdirAll(q.dir, 0o750); err != nil {
 		return fmt.Errorf("create queue dir: %w", err)
 	}
 	name := fmt.Sprintf("%d_%06d_r0.json", time.Now().UTC().UnixNano(), q.randIntn(1_000_000))
 	tmpPath := filepath.Join(q.dir, name+".tmp")
 	finalPath := filepath.Join(q.dir, name)
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
 		return fmt.Errorf("write queue file: %w", err)
 	}
 	if err := os.Rename(tmpPath, finalPath); err != nil {
@@ -346,13 +343,20 @@ func (q *Queue) signalFlush() {
 }
 
 func (q *Queue) randFloat64() float64 {
-	q.randMu.Lock()
-	defer q.randMu.Unlock()
-	return q.rng.Float64()
+	n, err := rand.Int(rand.Reader, big.NewInt(10000))
+	if err != nil {
+		return 0.5
+	}
+	return float64(n.Int64()) / 10000.0
 }
 
 func (q *Queue) randIntn(n int) int {
-	q.randMu.Lock()
-	defer q.randMu.Unlock()
-	return q.rng.Intn(n)
+	if n <= 0 {
+		return 0
+	}
+	val, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
+	if err != nil {
+		return 0
+	}
+	return int(val.Int64())
 }

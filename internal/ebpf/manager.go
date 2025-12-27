@@ -134,7 +134,7 @@ func (m *Manager) loadNetwork(cfg config.NetworkConfig) error {
 	if cgroupPath == "" {
 		cgroupPath = "/sys/fs/cgroup"
 	}
-	cgroup, err := os.Open(cgroupPath)
+	cgroup, err := os.Open(cgroupPath) // #nosec G304 -- path is provided by operator configuration
 	if err != nil {
 		return fmt.Errorf("open cgroup path: %w", err)
 	}
