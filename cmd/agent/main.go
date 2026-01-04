@@ -23,6 +23,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/uuid"
 )
 
 func main() {
@@ -72,7 +73,14 @@ func main() {
 			logger.Info("defaulting cluster name to unknown")
 		}
 		if clusterID == "" || clusterID == placeholderName {
-			clusterID = clusterName
+			// Try to get a stable ID from kube-system namespace
+			if id, err := kube.GetClusterID(ctx, kubeClient.Kubernetes); err == nil && id != "" {
+				clusterID = id
+				logger.Info("using kube-system namespace uid as cluster id", slog.String("content", id))
+			} else {
+				clusterID = clusterName
+				logger.Warn("failed to get stable cluster id", slog.String("error", err.Error()))
+			}
 		}
 	}
 
@@ -166,10 +174,13 @@ func main() {
 	})
 	priceLookup := snapshot.NewNodePriceLookup(cfg.Pricing.InstancePrices, cfg.Pricing.DefaultNodeHourlyUSD)
 	networkPriceLookup := snapshot.NewNetworkPriceLookup(cfg.Pricing.Network.DefaultEgressGiBPriceUSD, cfg.Pricing.Network.EgressGiBPricesUSD)
-	builder := snapshot.NewBuilder(clusterID, classifier, priceLookup, networkPriceLookup)
+	builder := snapshot.NewBuilder(clusterID, classifier, priceLookup, networkPriceLookup, cfg.Network.Detailed)
 	store := snapshot.NewStore()
 
-	go runSnapshotLoop(ctx, builder, cache, metricsCollector, networkCollector, queue, clusterID, clusterName, nodeName, agentVersion, store, cfg.ScrapeInterval(), logger)
+	agentID := string(uuid.NewUUID())
+	logger.Info("agent id generated", slog.String("agentId", agentID))
+
+	go runSnapshotLoop(ctx, builder, cache, metricsCollector, networkCollector, queue, clusterID, clusterName, nodeName, agentID, agentVersion, store, cfg.ScrapeInterval(), logger)
 
 	apiHandler := api.NewHandler(clusterType, clusterName, clusterRegion, agentVersion, store)
 	mux := http.NewServeMux()
@@ -183,12 +194,12 @@ func main() {
 	}
 }
 
-func runSnapshotLoop(ctx context.Context, builder *snapshot.Builder, cache *kube.ClusterCache, metricsCollector collector.PodMetricsCollector, networkCollector collector.NetworkCollector, queue *forwarder.Queue, clusterID, clusterName, nodeName, version string, store *snapshot.Store, interval time.Duration, logger *slog.Logger) {
+func runSnapshotLoop(ctx context.Context, builder *snapshot.Builder, cache *kube.ClusterCache, metricsCollector collector.PodMetricsCollector, networkCollector collector.NetworkCollector, queue *forwarder.Queue, clusterID, clusterName, nodeName, agentID, version string, store *snapshot.Store, interval time.Duration, logger *slog.Logger) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
-		if err := buildOnce(ctx, builder, cache, metricsCollector, networkCollector, queue, clusterID, clusterName, nodeName, version, store, logger); err != nil {
+		if err := buildOnce(ctx, builder, cache, metricsCollector, networkCollector, queue, clusterID, clusterName, nodeName, agentID, version, store, logger); err != nil {
 			logger.Warn("snapshot refresh failed", slog.String("error", err.Error()))
 		}
 
@@ -200,7 +211,7 @@ func runSnapshotLoop(ctx context.Context, builder *snapshot.Builder, cache *kube
 	}
 }
 
-func buildOnce(ctx context.Context, builder *snapshot.Builder, cache *kube.ClusterCache, metricsCollector collector.PodMetricsCollector, networkCollector collector.NetworkCollector, queue *forwarder.Queue, clusterID, clusterName, nodeName, version string, store *snapshot.Store, logger *slog.Logger) error {
+func buildOnce(ctx context.Context, builder *snapshot.Builder, cache *kube.ClusterCache, metricsCollector collector.PodMetricsCollector, networkCollector collector.NetworkCollector, queue *forwarder.Queue, clusterID, clusterName, nodeName, agentID, version string, store *snapshot.Store, logger *slog.Logger) error {
 	nodes, err := cache.NodeLister().List(labels.Everything())
 	if err != nil {
 		return err
@@ -251,6 +262,7 @@ func buildOnce(ctx context.Context, builder *snapshot.Builder, cache *kube.Clust
 			ClusterID:   clusterID,
 			ClusterName: clusterName,
 			NodeName:    nodeName,
+			AgentID:     agentID,
 			Version:     version,
 			Timestamp:   time.Now().UTC(),
 			Snapshot:    store.LatestSnapshot(),

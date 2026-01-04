@@ -55,6 +55,7 @@ type NetworkPricingConfig struct {
 // NetworkConfig configures network usage collection.
 type NetworkConfig struct {
 	Enabled    bool   `yaml:"enabled"`
+	Detailed   bool   `yaml:"detailed"`
 	BPFMapPath string `yaml:"bpfMapPath"`
 	ObjectPath string `yaml:"objectPath"`
 	CgroupPath string `yaml:"cgroupPath"`
@@ -120,6 +121,7 @@ func DefaultConfig() Config {
 		},
 		Network: NetworkConfig{
 			Enabled:    false,
+			Detailed:   false,
 			BPFMapPath: "/sys/fs/bpf/clustercost/flows",
 			ObjectPath: "/opt/clustercost/bpf/flows.bpf.o",
 			CgroupPath: "/sys/fs/cgroup",
@@ -199,6 +201,7 @@ func Load() (Config, error) {
 	fs.Float64Var(&cfg.Pricing.CPUCoreHourPriceUSD, "cpu-price", cfg.Pricing.CPUCoreHourPriceUSD, "CPU core hour price in USD")
 	fs.Float64Var(&cfg.Pricing.MemoryGiBHourPriceUSD, "memory-price", cfg.Pricing.MemoryGiBHourPriceUSD, "Memory GiB hour price in USD")
 	fs.BoolVar(&cfg.Network.Enabled, "enable-network-cost", cfg.Network.Enabled, "Enable eBPF-based network cost collection")
+	fs.BoolVar(&cfg.Network.Detailed, "enable-network-detailed", cfg.Network.Detailed, "Enable detailed network connection reporting")
 	fs.StringVar(&cfg.Network.BPFMapPath, "ebpf-map-path", cfg.Network.BPFMapPath, "Pinned eBPF map path for network flow stats")
 	fs.StringVar(&cfg.Network.ObjectPath, "ebpf-net-object", cfg.Network.ObjectPath, "Path to eBPF network object file")
 	fs.StringVar(&cfg.Network.CgroupPath, "ebpf-net-cgroup-path", cfg.Network.CgroupPath, "Cgroup path for eBPF network attachment")
@@ -402,6 +405,11 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.Network.Enabled = bv
 		}
 	}
+	if v := os.Getenv("CLUSTERCOST_NETWORK_DETAILED"); v != "" {
+		if bv, err := strconv.ParseBool(v); err == nil {
+			cfg.Network.Detailed = bv
+		}
+	}
 	if v := os.Getenv("CLUSTERCOST_EBPF_MAP_PATH"); v != "" {
 		cfg.Network.BPFMapPath = v
 	}
@@ -576,6 +584,9 @@ func mergeNetworkPricingConfig(base *NetworkPricingConfig, override NetworkPrici
 func mergeNetworkConfig(base *NetworkConfig, override NetworkConfig) {
 	if override.Enabled {
 		base.Enabled = override.Enabled
+	}
+	if override.Detailed {
+		base.Detailed = override.Detailed
 	}
 	if override.BPFMapPath != "" {
 		base.BPFMapPath = override.BPFMapPath
